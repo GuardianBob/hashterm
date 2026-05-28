@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HASHTERM // Password Hasher</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+  <!-- bcrypt.js -->
+  <script src="https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
+  <!-- MD5 -->
+  <script src="https://cdn.jsdelivr.net/npm/blueimp-md5@2.19.0/js/md5.min.js"></script>
+  <!-- Argon2 -->
+  <script src="https://cdn.jsdelivr.net/npm/argon2-browser/dist/argon2-bundled.min.js"></script>
+
+  <style>
+    :root {
+      --bg:        #0d0d0d;
+      --surface:   #131313;
+      --border:    #1f1f1f;
+      --border-hi: #2a2a2a;
+      --green:     #39ff14;
+      --green-dim: #1a7a09;
+      --amber:     #ffb300;
+      --amber-dim: #7a5500;
+      --red:       #ff3333;
+      --text:      #c8c8c8;
+      --text-dim:  #555;
+      --font:      'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* ── scanline overlay ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1000;
+      background:
+        repeating-linear-gradient(
+          0deg,
+          transparent,
+          transparent 2px,
+          rgba(0,0,0,0.18) 2px,
+          rgba(0,0,0,0.18) 4px
+        );
+      mix-blend-mode: multiply;
+    }
+
+    /* ── noise texture ── */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 999;
+      opacity: 0.04;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+      background-repeat: repeat;
+      background-size: 128px 128px;
+    }
+
+    .wrapper {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 16px 60px;
+    }
+
+    /* ── header ── */
+    header {
+      width: 100%;
+      max-width: 680px;
+      margin-bottom: 36px;
+      border-bottom: 1px solid var(--border-hi);
+      padding-bottom: 20px;
+    }
+
+    .logo-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .logo {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: var(--green);
+      text-shadow: 0 0 12px rgba(57,255,20,0.4);
+    }
+
+    .logo-slash {
+      color: var(--text-dim);
+      font-weight: 300;
+    }
+
+    .logo-sub {
+      font-size: 12px;
+      color: var(--text-dim);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+
+    .status-bar {
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 0.08em;
+    }
+
+    .status-bar span { color: var(--green); }
+
+    /* ── card ── */
+    .card {
+      width: 100%;
+      max-width: 680px;
+      background: var(--surface);
+      border: 1px solid var(--border-hi);
+      border-radius: 2px;
+      padding: 28px;
+      position: relative;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--green-dim), var(--green), var(--green-dim));
+      border-radius: 2px 2px 0 0;
+    }
+
+    /* ── form elements ── */
+    .field { margin-bottom: 22px; }
+
+    label {
+      display: block;
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+
+    label .required { color: var(--green); }
+    label .tag {
+      margin-left: 8px;
+      padding: 1px 6px;
+      border: 1px solid var(--amber-dim);
+      color: var(--amber);
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      border-radius: 2px;
+      vertical-align: middle;
+    }
+
+    .input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    select,
+    textarea {
+      width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border-hi);
+      border-radius: 2px;
+      padding: 10px 14px;
+      font-family: var(--font);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      appearance: none;
+    }
+
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    input[type="number"]:focus,
+    select:focus,
+    textarea:focus {
+      border-color: var(--green-dim);
+      box-shadow: 0 0 0 2px rgba(57,255,20,0.08);
+    }
+
+    .input-wrap input { padding-right: 48px; }
+
+    .toggle-btn {
+      position: absolute;
+      right: 10px;
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      padding: 4px 6px;
+      transition: color 0.2s;
+      user-select: none;
+    }
+    .toggle-btn:hover { color: var(--green); }
+
+    select {
+      cursor: pointer;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23555' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 38px;
+    }
+
+    /* ── algorithm options ── */
+    .algo-options {
+      background: rgba(0,0,0,0.3);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 16px;
+      margin-bottom: 22px;
+      display: none;
+    }
+    .algo-options.visible { display: block; }
+    .algo-options .field:last-child { margin-bottom: 0; }
+
+    .option-title {
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--amber);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .option-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--amber-dim);
+      opacity: 0.4;
+    }
+
+    /* ── slider ── */
+    .slider-wrap {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    input[type="range"] {
+      flex: 1;
+      -webkit-appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-track {
+      height: 3px;
+      background: var(--border-hi);
+      border-radius: 2px;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      background: var(--green);
+      border-radius: 50%;
+      margin-top: -5.5px;
+      box-shadow: 0 0 8px rgba(57,255,20,0.5);
+      transition: box-shadow 0.2s;
+    }
+    input[type="range"]:focus::-webkit-slider-thumb {
+      box-shadow: 0 0 14px rgba(57,255,20,0.7);
+    }
+    input[type="range"]::-moz-range-track {
+      height: 3px;
+      background: var(--border-hi);
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      background: var(--green);
+      border: none;
+      border-radius: 50%;
+    }
+
+    .slider-val {
+      min-width: 32px;
+      text-align: center;
+      color: var(--green);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    /* ── number inputs for argon2 ── */
+    .argon-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 480px) {
+      .argon-grid { grid-template-columns: 1fr; }
+    }
+
+    input[type="number"] {
+      -moz-appearance: textfield;
+    }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+    }
+
+    /* ── hash button ── */
+    .btn-hash {
+      width: 100%;
+      padding: 13px;
+      background: transparent;
+      border: 1px solid var(--green-dim);
+      color: var(--green);
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: background 0.2s, box-shadow 0.2s, border-color 0.2s;
+      position: relative;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+
+    .btn-hash:hover {
+      background: rgba(57,255,20,0.06);
+      border-color: var(--green);
+      box-shadow: 0 0 20px rgba(57,255,20,0.15), inset 0 0 20px rgba(57,255,20,0.04);
+    }
+
+    .btn-hash:active { transform: translateY(1px); }
+
+    .btn-hash:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* ── spinner ── */
+    .spinner {
+      display: none;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(57,255,20,0.2);
+      border-top-color: var(--green);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto;
+    }
+    .btn-hash.loading .btn-text { display: none; }
+    .btn-hash.loading .spinner { display: inline-block; }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── output area ── */
+    .output-section {
+      display: none;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.3s, transform 0.3s;
+    }
+    .output-section.visible {
+      display: block;
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .output-label-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .output-label {
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .algo-badge {
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      color: var(--green);
+      border: 1px solid var(--green-dim);
+      padding: 2px 8px;
+      border-radius: 2px;
+    }
+
+    textarea#output {
+      resize: vertical;
+      min-height: 80px;
+      font-size: 13px;
+      color: var(--green);
+      word-break: break-all;
+      cursor: default;
+      letter-spacing: 0.03em;
+      line-height: 1.7;
+    }
+
+    .copy-btn {
+      margin-top: 10px;
+      width: 100%;
+      padding: 9px;
+      background: transparent;
+      border: 1px solid var(--border-hi);
+      color: var(--text-dim);
+      font-family: var(--font);
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: all 0.2s;
+    }
+    .copy-btn:hover {
+      border-color: var(--green-dim);
+      color: var(--green);
+      background: rgba(57,255,20,0.04);
+    }
+    .copy-btn.copied {
+      border-color: var(--green);
+      color: var(--green);
+      background: rgba(57,255,20,0.08);
+    }
+
+    /* ── error ── */
+    .error-box {
+      display: none;
+      margin-top: 18px;
+      padding: 12px 16px;
+      border: 1px solid var(--red);
+      background: rgba(255,51,51,0.05);
+      border-radius: 2px;
+      color: var(--red);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+    }
+    .error-box.visible { display: block; }
+
+    /* ── footer ── */
+    footer {
+      margin-top: 32px;
+      width: 100%;
+      max-width: 680px;
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .footer-text {
+      font-size: 10px;
+      color: var(--text-dim);
+      letter-spacing: 0.1em;
+    }
+    .footer-text span { color: var(--green-dim); }
+
+    /* ── divider ── */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 24px 0;
+    }
+
+    /* ── timing badge ── */
+    .timing {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 8px;
+      letter-spacing: 0.06em;
+    }
+    .timing span { color: var(--amber); }
+  </style>
+</head>
+<body>
+<div class="wrapper">
+
+  <header>
+    <div class="logo-row">
+      <span class="logo">HASHTERM</span>
+      <span class="logo-slash">//</span>
+      <span class="logo-sub">Client-side Password Hasher</span>
+    </div>
+    <p class="status-bar">// SYS: <span>ALL CRYPTO OPS CLIENT-SIDE</span> &nbsp;|&nbsp; NO DATA LEAVES YOUR BROWSER</p>
+  </header>
+
+  <div class="card">
+
+    <!-- password input -->
+    <div class="field">
+      <label>Input <span class="required">*</span></label>
+      <div class="input-wrap">
+        <input type="password" id="password" placeholder="Enter password to hash..." autocomplete="off" spellcheck="false">
+        <button class="toggle-btn" id="toggle-pw" type="button" aria-label="Show/hide password">SHOW</button>
+      </div>
+    </div>
+
+    <!-- algorithm selector -->
+    <div class="field">
+      <label>Algorithm</label>
+      <select id="algorithm">
+        <option value="bcrypt">bcrypt</option>
+        <option value="argon2">argon2id</option>
+        <option value="sha256" selected>SHA-256</option>
+        <option value="sha512">SHA-512</option>
+        <option value="md5">MD5 &nbsp;— insecure, legacy only</option>
+      </select>
+    </div>
+
+    <!-- bcrypt options -->
+    <div class="algo-options" id="opts-bcrypt">
+      <div class="option-title">bcrypt options</div>
+      <div class="field">
+        <label>Cost Factor (rounds)</label>
+        <div class="slider-wrap">
+          <input type="range" id="bcrypt-cost" min="8" max="14" value="10" step="1">
+          <span class="slider-val" id="bcrypt-cost-val">10</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- argon2 options -->
+    <div class="algo-options" id="opts-argon2">
+      <div class="option-title">argon2id options</div>
+      <div class="argon-grid">
+        <div class="field">
+          <label>Memory (KiB)</label>
+          <input type="number" id="argon2-mem" value="65536" min="4096" max="1048576" step="1024">
+        </div>
+        <div class="field">
+          <label>Iterations</label>
+          <input type="number" id="argon2-iter" value="3" min="1" max="20" step="1">
+        </div>
+        <div class="field">
+          <label>Parallelism</label>
+          <input type="number" id="argon2-para" value="1" min="1" max="8" step="1">
+        </div>
+      </div>
+    </div>
+
+    <!-- MD5 warning -->
+    <div class="algo-options" id="opts-md5">
+      <div class="option-title" style="color:var(--red); border-bottom:none; margin-bottom:0;">
+        <span>⚠ security warning</span>
+      </div>
+      <p style="font-size:11px; color:#ff7070; letter-spacing:0.04em; line-height:1.8; margin-top:10px;">
+        MD5 is <strong>cryptographically broken</strong> and must not be used for password storage. 
+        It is provided here for legacy compatibility and educational purposes only.
+      </p>
+    </div>
+
+    <!-- hash button -->
+    <button class="btn-hash" id="hash-btn" type="button">
+      <span class="btn-text">&gt;_ GENERATE HASH</span>
+      <span class="spinner"></span>
+    </button>
+
+    <!-- output -->
+    <div class="output-section" id="output-section">
+      <div class="output-label-row">
+        <span class="output-label">Hash Output</span>
+        <span class="algo-badge" id="algo-badge">SHA-256</span>
+      </div>
+      <textarea id="output" readonly spellcheck="false"></textarea>
+      <div class="timing" id="timing"></div>
+      <button class="copy-btn" id="copy-btn" type="button">&gt;_ COPY TO CLIPBOARD</button>
+    </div>
+
+    <!-- error -->
+    <div class="error-box" id="error-box"></div>
+
+  </div>
+
+  <footer>
+    <span class="footer-text">// HASHTERM v1.0 &nbsp;|&nbsp; <span>100% CLIENT-SIDE</span></span>
+    <span class="footer-text">bcrypt.js · argon2-browser · blueimp-md5 · Web Crypto API</span>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const $ = id => document.getElementById(id);
+
+  const elPw       = $('password');
+  const elTogglePw = $('toggle-pw');
+  const elAlgo     = $('algorithm');
+  const elHashBtn  = $('hash-btn');
+  const elOutput   = $('output');
+  const elOutSect  = $('output-section');
+  const elAlgoBadge= $('algo-badge');
+  const elCopyBtn  = $('copy-btn');
+  const elError    = $('error-box');
+  const elTiming   = $('timing');
+
+  const elBcryptOpts = $('opts-bcrypt');
+  const elArgon2Opts = $('opts-argon2');
+  const elMd5Opts    = $('opts-md5');
+
+  const elBcryptCost    = $('bcrypt-cost');
+  const elBcryptCostVal = $('bcrypt-cost-val');
+  const elArgon2Mem     = $('argon2-mem');
+  const elArgon2Iter    = $('argon2-iter');
+  const elArgon2Para    = $('argon2-para');
+
+  // ── show/hide password ──────────────────────────────────────────
+  elTogglePw.addEventListener('click', () => {
+    const isHidden = elPw.type === 'password';
+    elPw.type = isHidden ? 'text' : 'password';
+    elTogglePw.textContent = isHidden ? 'HIDE' : 'SHOW';
+  });
+
+  // ── bcrypt cost slider label ────────────────────────────────────
+  elBcryptCost.addEventListener('input', () => {
+    elBcryptCostVal.textContent = elBcryptCost.value;
+  });
+
+  // ── algorithm switcher ──────────────────────────────────────────
+  function updateAlgoOptions() {
+    const algo = elAlgo.value;
+    elBcryptOpts.classList.toggle('visible', algo === 'bcrypt');
+    elArgon2Opts.classList.toggle('visible', algo === 'argon2');
+    elMd5Opts.classList.toggle('visible', algo === 'md5');
+  }
+
+  elAlgo.addEventListener('change', () => {
+    updateAlgoOptions();
+    hideOutput();
+    clearError();
+  });
+
+  updateAlgoOptions();
+
+  // ── helpers ─────────────────────────────────────────────────────
+  function setLoading(on) {
+    elHashBtn.disabled = on;
+    elHashBtn.classList.toggle('loading', on);
+  }
+
+  function showOutput(hash, algo, ms) {
+    elOutput.value = hash;
+    elAlgoBadge.textContent = algo;
+    elTiming.innerHTML = ms !== null
+      ? `// computed in <span>${ms.toFixed(0)} ms</span>`
+      : '';
+    elOutSect.classList.add('visible');
+    // trigger transition
+    void elOutSect.offsetWidth;
+  }
+
+  function hideOutput() {
+    elOutSect.classList.remove('visible');
+  }
+
+  function showError(msg) {
+    elError.textContent = `// ERROR: ${msg}`;
+    elError.classList.add('visible');
+    hideOutput();
+  }
+
+  function clearError() {
+    elError.classList.remove('visible');
+    elError.textContent = '';
+  }
+
+  // ── Web Crypto helper ───────────────────────────────────────────
+  async function webCryptoHash(algo, text) {
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest(algo, enc.encode(text));
+    return Array.from(new Uint8Array(buf))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  // ── main hash function ──────────────────────────────────────────
+  async function doHash() {
+    const pw = elPw.value;
+    if (!pw) { showError('Password input is empty.'); return; }
+
+    const algo = elAlgo.value;
+    clearError();
+    hideOutput();
+    setLoading(true);
+
+    const t0 = performance.now();
+
+    try {
+      let hash;
+      let label;
+
+      switch (algo) {
+
+        case 'bcrypt': {
+          const cost = parseInt(elBcryptCost.value, 10);
+          label = `bcrypt (cost=${cost})`;
+          // bcryptjs is synchronous but heavy — yield to browser first
+          await new Promise(r => setTimeout(r, 20));
+          const salt = await dcodeIO.bcrypt.genSalt(cost);
+          hash = await dcodeIO.bcrypt.hash(pw, salt);
+          break;
+        }
+
+        case 'argon2': {
+          const mem  = parseInt(elArgon2Mem.value,  10);
+          const iter = parseInt(elArgon2Iter.value, 10);
+          const para = parseInt(elArgon2Para.value, 10);
+          label = `argon2id (m=${mem}, t=${iter}, p=${para})`;
+
+          // argon2-browser: type 2 = Argon2id
+          const result = await window.argon2.hash({
+            pass:     pw,
+            salt:     crypto.getRandomValues(new Uint8Array(16)),
+            time:     iter,
+            mem:      mem,
+            parallelism: para,
+            type:     window.argon2.ArgonType.Argon2id,
+            hashLen:  32,
+          });
+          hash = result.encoded;
+          break;
+        }
+
+        case 'sha256': {
+          label = 'SHA-256';
+          hash = await webCryptoHash('SHA-256', pw);
+          break;
+        }
+
+        case 'sha512': {
+          label = 'SHA-512';
+          hash = await webCryptoHash('SHA-512', pw);
+          break;
+        }
+
+        case 'md5': {
+          label = 'MD5 ⚠';
+          // blueimp-md5
+          hash = md5(pw);
+          break;
+        }
+
+        default:
+          throw new Error('Unknown algorithm selected.');
+      }
+
+      const ms = performance.now() - t0;
+      showOutput(hash, label, ms);
+
+    } catch (err) {
+      console.error(err);
+      showError(err.message || String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  elHashBtn.addEventListener('click', doHash);
+
+  // allow Enter key from password field
+  elPw.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doHash();
+  });
+
+  // ── copy to clipboard ───────────────────────────────────────────
+  elCopyBtn.addEventListener('click', async () => {
+    const text = elOutput.value;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      elCopyBtn.textContent = '✓ COPIED';
+      elCopyBtn.classList.add('copied');
+      setTimeout(() => {
+        elCopyBtn.textContent = '>_ COPY TO CLIPBOARD';
+        elCopyBtn.classList.remove('copied');
+      }, 2000);
+    } catch {
+      // fallback
+      elOutput.select();
+      document.execCommand('copy');
+      elCopyBtn.textContent = '✓ COPIED (fallback)';
+      setTimeout(() => {
+        elCopyBtn.textContent = '>_ COPY TO CLIPBOARD';
+      }, 2000);
+    }
+  });
+
+})();
+</script>
+</body>
+</html>
